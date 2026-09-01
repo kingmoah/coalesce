@@ -5,174 +5,220 @@
 
 #include "net.h"
 #include "ssh.h"
+#include "buffer.h"
+#include "packet.h"
 
 int server(int port);
-int client(char auth[], char address[], int port);
+int client(const char *user, const char *host, int port);
 
-/// @brief splits a string based on a specified pattern, 
-/// returns an array of strings on success, NULL on failure
-/// @param string 
-/// @param pattern 
-/// @return array of strings 
-char **str_spit(char *string, char* pattern);
+/* Helper to parse target: user@host[:port] */
+static int parse_target(const char *target, char *out_user, size_t user_sz,
+                        char *out_host, size_t host_sz, int *out_port)
+{
+    const char *at = strchr(target, '@');
+    if (!at) return -1;
 
-/// @brief checks if the string contains a specified pattern
-/// returns 0 if false, 1 if the condition has been met.
-/// @param string 
-/// @param pattern 
-/// @return 0 = false, 1 = true
-int str_contains(char *string, char* pattern);
+    size_t ulen = (size_t)(at - target);
+    if (ulen == 0 || ulen >= user_sz) return -1;
+    memcpy(out_user, target, ulen);
+    out_user[ulen] = '\0';
+
+    const char *hp = at + 1;
+    const char *colon = strchr(hp, ':');
+    if (colon) {
+        size_t hlen = (size_t)(colon - hp);
+        if (hlen == 0 || hlen >= host_sz) return -1;
+        memcpy(out_host, hp, hlen);
+        out_host[hlen] = '\0';
+        *out_port = atoi(colon + 1);
+        if (*out_port <= 0 || *out_port > 65535) return -1;
+    } else {
+        size_t hlen = strlen(hp);
+        if (hlen == 0 || hlen >= host_sz) return -1;
+        memcpy(out_host, hp, hlen);
+        out_host[hlen] = '\0';
+        *out_port = 22;
+    }
+    return 0;
+}
 
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "usage: coalesce serve <port>\n"
-                        "       coalesce connect username:port@address:port\n");
+        fprintf(stderr, "usage: coalesce serve [port]\n"
+                        "       coalesce connect user@host[:port]\n");
         return 1;
     }
 
-
     if (net_init() != 0) {
-        fprintf(stderr, "WSAStartup failed: %s\n", net_get_error());
+        fprintf(stderr, "net_init failed: %s\n", net_get_error());
         return 1;
-    } 
+    }
 
+    int rc = 0;
     if (strcmp(argv[1], "serve") == 0) {
         int port = 22;
         if (argc > 2)
             port = atoi(argv[2]);
-        server(port);
-
+        rc = server(port);
     } else if (strcmp(argv[1], "connect") == 0) {
-        if (argc < 3 || !str_contains(argv[2], "@")) {
-            fprintf(stderr, "usage: coalesce connect username:port@address:port\n");
+        if (argc < 3) {
+            fprintf(stderr, "usage: coalesce connect user@host[:port]\n");
+            net_shutdown();
             return 1;
         }
 
-        char **set = str_spit(argv[2], "@");
-        char *auth = set[0];
+        char user[128] = {0};
+        char host[256] = {0};
+        int port = 22;
 
-        char **hp = str_spit(set[1], ":");
-        int result = client(auth, hp[0], atoi(hp[1]));
-
-        free(hp);
-        free(set);
-
-        if (result != 0) {
-            fprintf(stderr, "failed to connect to %s:%s\n", hp[0], hp[1]);
+        if (parse_target(argv[2], user, sizeof(user), host, sizeof(host), &port) != 0) {
+            fprintf(stderr, "error: invalid target format '%s' (expected user@host[:port])\n", argv[2]);
+            net_shutdown();
             return 1;
         }
 
+        rc = client(user, host, port);
     } else {
         fprintf(stderr, "unknown command: %s\n", argv[1]);
-        fprintf(stderr, "usage: coalesce serve <port>\n"
-                        "       coalesce connect username:port@address:port\n");
-        return 1;
+        fprintf(stderr, "usage: coalesce serve [port]\n"
+                        "       coalesce connect user@host[:port]\n");
+        rc = 1;
     }
+
     net_shutdown();
-    return 0;
-}   
+    return rc;
+}
 
-
-int server(int port){
-
+int server(int port)
+{
+    printf("[server] Listening on 0.0.0.0:%d ...\n", port);
     net_socket_t fd = net_listen("0.0.0.0", port);
-    if(NET_INVALID == fd){
-        fprintf(stderr, "net_listen: failed to listern at port %d", port);
-        fprintf(stderr, "\r\n%s",net_get_error());
-        return -1;
-    }
-    struct net_addr *out_addr = {0};
-    net_socket_t client = net_accept(fd, out_addr);
-
-    if(NET_INVALID == client){
-        fprintf(stderr, "net_accept: failed to accept new client");
-        fprintf(stderr, "\r\n%s",net_get_error());
+    if (!NET_IS_VALID(fd)) {
+        fprintf(stderr, "[server] net_listen failed: %s\n", net_get_error());
         return -1;
     }
 
-    if (net_write_full(client, IDENT_STRING, sizeof(IDENT_STRING) - 1) < 0) {
-        fprintf(stderr, "write: %s\n", net_get_error());
-        net_close(client);
+    struct net_addr client_addr = {0};
+    net_socket_t client_sock = net_accept(fd, &client_addr);
+    if (!NET_IS_VALID(client_sock)) {
+        fprintf(stderr, "[server] net_accept failed: %s\n", net_get_error());
+        net_close(fd);
+        return -1;
+    }
+    printf("[server] Connection accepted from %s:%d\n", client_addr.ip, client_addr.port);
+
+    /* 1. Send version identification */
+    if (net_write_full(client_sock, IDENT_STRING, sizeof(IDENT_STRING) - 1) < 0) {
+        fprintf(stderr, "[server] write ident error: %s\n", net_get_error());
+        net_close(client_sock);
+        net_close(fd);
         return -1;
     }
 
-    char in[1024];
-    if(0 > net_read_line(client,in,1024))
-    {
-        fprintf(stderr, "read: %s\n", net_get_error());
-        net_close(client);
+    /* 2. Read client version identification */
+    char client_ident[256];
+    if (net_read_line(client_sock, client_ident, sizeof(client_ident)) <= 0) {
+        fprintf(stderr, "[server] read client ident error: %s\n", net_get_error());
+        net_close(client_sock);
+        net_close(fd);
         return -1;
     }
+    printf("[server] Client identification: %s", client_ident);
 
-    printf("\r\nclient: %s",in);
+    /* 3. Receive initial binary packet from client */
+    uint32_t seq_in = 0;
+    uint32_t seq_out = 0;
+    ssh_pkt_t pkt;
+    pkt_init(&pkt);
 
-    //send version ident
+    if (pkt_recv(client_sock, &pkt, &seq_in, 8) == 0) {
+        uint8_t msg_type = 0;
+        if (buf_get_u8(&pkt.payload, &msg_type) == 0) {
+            printf("[server] Received packet msg_type=%d, payload_len=%zu\n",
+                   msg_type, buf_len(&pkt.payload));
+        }
+
+        /* Echo back an SSH_MSG_DEBUG packet */
+        ssh_buf_t reply;
+        buf_init(&reply, 64);
+        buf_put_u8(&reply, SSH_MSG_DEBUG);
+        buf_put_bool(&reply, true);
+        buf_put_cstring(&reply, "Coalesce Phase 1 binary packet framed successfully");
+        buf_put_cstring(&reply, "");
+
+        pkt_send_buf(client_sock, &reply, &seq_out, 8);
+        buf_free(&reply);
+    }
+
+    pkt_free(&pkt);
+    net_close(client_sock);
+    net_close(fd);
+    printf("[server] Session ended cleanly.\n");
     return 0;
 }
 
-int client(char auth[], char address[], int port)
+int client(const char *user, const char *host, int port)
 {
-    net_socket_t s = net_connect(address, port);
-    if (NET_INVALID == s) {
-        fprintf(stderr, "net_connect: %s\n", net_get_error());
+    printf("[client] Connecting to %s@%s:%d ...\n", user, host, port);
+    net_socket_t s = net_connect(host, port);
+    if (!NET_IS_VALID(s)) {
+        fprintf(stderr, "[client] net_connect failed: %s\n", net_get_error());
         return -1;
     }
 
-    /* send identification */
+    /* 1. Send client identification */
     if (net_write_full(s, IDENT_STRING, sizeof(IDENT_STRING) - 1) < 0) {
-        fprintf(stderr, "write: %s\n", net_get_error());
+        fprintf(stderr, "[client] write ident error: %s\n", net_get_error());
         net_close(s);
         return -1;
     }
 
-    /* read server identification */
-    char line[256];
-    if (net_read_line(s, line, sizeof line) <= 0) {
-        fprintf(stderr, "read: %s\n", net_get_error());
+    /* 2. Read server identification */
+    char server_ident[256];
+    if (net_read_line(s, server_ident, sizeof(server_ident)) <= 0) {
+        fprintf(stderr, "[client] read server ident error: %s\n", net_get_error());
         net_close(s);
         return -1;
     }
+    printf("[client] Server identification: %s", server_ident);
 
-    printf("server: %s", line);
+    /* 3. Send test binary packet (SSH_MSG_IGNORE) */
+    uint32_t seq_out = 0;
+    uint32_t seq_in = 0;
+    ssh_buf_t msg;
+    buf_init(&msg, 64);
+    buf_put_u8(&msg, SSH_MSG_IGNORE);
+    buf_put_cstring(&msg, "coalesce test packet");
+
+    if (pkt_send_buf(s, &msg, &seq_out, 8) != 0) {
+        fprintf(stderr, "[client] Failed to send packet\n");
+    } else {
+        printf("[client] Sent SSH_MSG_IGNORE packet (seq=%u)\n", seq_out - 1);
+    }
+    buf_free(&msg);
+
+    /* 4. Receive reply packet */
+    ssh_pkt_t reply_pkt;
+    pkt_init(&reply_pkt);
+    if (pkt_recv(s, &reply_pkt, &seq_in, 8) == 0) {
+        uint8_t msg_type = 0;
+        buf_get_u8(&reply_pkt.payload, &msg_type);
+        if (msg_type == SSH_MSG_DEBUG) {
+            bool display = false;
+            buf_get_bool(&reply_pkt.payload, &display);
+            char *dbg_msg = buf_get_cstring(&reply_pkt.payload);
+            printf("[client] Received SSH_MSG_DEBUG (always_display=%d): %s\n",
+                   display, dbg_msg ? dbg_msg : "");
+            free(dbg_msg);
+        } else {
+            printf("[client] Received packet msg_type=%d, payload_len=%zu\n",
+                   msg_type, buf_len(&reply_pkt.payload));
+        }
+    }
+    pkt_free(&reply_pkt);
 
     net_close(s);
+    printf("[client] Connection closed.\n");
     return 0;
-}   
-
-
-
-/* ── str_contains ────────────────────────────────────────────── */
-int str_contains(char *string, char *pattern)
-{
-    if (!string || !pattern || !*pattern) return 0;
-    return strstr(string, pattern) != NULL;
-}
-
-/* ── str_spit ────────────────────────────────────────────────── */
-char **str_spit(char *string, char *pattern)
-{
-    if (!string || !pattern || !*pattern) return NULL;
-
-    /* count tokens */
-    size_t count = 1;
-    for (char *p = string; *p; p++)
-        if (*p == pattern[0]) count++;
-
-    /* allocate result array + one extra for NULL sentinel */
-    char **out = calloc(count + 1, sizeof *out);
-    if (!out) return NULL;
-
-    /* tokenize in-place (modifies `string`) */
-    char *save = NULL;
-    char *tok  = strtok_r(string, pattern, &save);
-    size_t i = 0;
-
-    while (tok) {
-        out[i++] = tok;
-        tok = strtok_r(NULL, pattern, &save);
-    }
-    /* out[i] is already NULL from calloc — sentinel */
-
-    return out;
 }   

@@ -16,15 +16,24 @@ endif
 
 # --- Project config ---
 PROJECT_NAME = coalesce
-CC       = gcc 
+CC       = gcc
 SRCDIR   = src
 BUILDDIR = build
-CFLAGS   = -Wall -O2
+
+# --- mbedtls vendor paths ---
+MBEDTLS_DIR   = vendor/mbedtls
+MBEDTLS_BUILD = $(MBEDTLS_DIR)/build
+MBEDTLS_LIB   = $(MBEDTLS_BUILD)/tf-psa-crypto/library/libmbedcrypto.a
+MBEDTLS_INC   = -I$(MBEDTLS_DIR)/include \
+                -I$(MBEDTLS_DIR)/tf-psa-crypto/include \
+                -I$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/include
+
+CFLAGS   = -Wall -O2 $(MBEDTLS_INC)
 
 ifeq ($(IS_WINDOWS),1)
-	LDLIBS  = -lws2_32
+	LDLIBS  = -lws2_32 -lbcrypt
 else
-	LDLIBS  = 
+	LDLIBS  =
 endif
 
 TARGET   = $(BUILDDIR)/$(PROJECT_NAME)$(EXE_EXT)
@@ -35,8 +44,8 @@ OBJS = $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.o,$(SRCS))
 # --- Rules ---
 all: $(TARGET)
 
-$(TARGET): $(OBJS) | $(BUILDDIR)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)  
+$(TARGET): $(OBJS) $(MBEDTLS_LIB) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(MBEDTLS_LIB) $(LDLIBS)
 
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -44,11 +53,34 @@ $(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
 $(BUILDDIR):
 	$(MKDIR) $@
 
+# --- Tests ---
+TEST1_TARGET = $(BUILDDIR)/test_phase1$(EXE_EXT)
+TEST2_TARGET = $(BUILDDIR)/test_phase2$(EXE_EXT)
+
+test: $(TEST1_TARGET) $(TEST2_TARGET)
+	./$(TEST1_TARGET)
+	./$(TEST2_TARGET)
+
+$(TEST1_TARGET): $(BUILDDIR)/buffer.o tests/test_phase1.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $^
+
+$(TEST2_TARGET): $(BUILDDIR)/buffer.o $(BUILDDIR)/sha256.o $(BUILDDIR)/curve25519.o $(BUILDDIR)/aes.o $(BUILDDIR)/kex.o tests/test_phase2.c $(MBEDTLS_LIB) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $(BUILDDIR)/buffer.o $(BUILDDIR)/sha256.o $(BUILDDIR)/curve25519.o $(BUILDDIR)/aes.o $(BUILDDIR)/kex.o tests/test_phase2.c $(MBEDTLS_LIB) $(LDLIBS)
+
+# --- Vendor bootstrap (run once after git submodule update --init) ---
+vendor-build:
+	cmake -S $(MBEDTLS_DIR) -B $(MBEDTLS_BUILD) \
+	      -DCMAKE_BUILD_TYPE=Release \
+	      -DENABLE_TESTING=OFF \
+	      -DENABLE_PROGRAMS=OFF
+	cmake --build $(MBEDTLS_BUILD) --target mbedcrypto
+
+# --- Clean ---
 clean:
 ifeq ($(IS_WINDOWS),1)
 	cmd /c "if exist $(BUILDDIR) (del /f /q $(subst /,\,$(BUILDDIR))\*.*)"
 else
-	$(RM) $(BUILDDIR)/*.o $(TARGET)
+	$(RM) $(BUILDDIR)/*.o $(TARGET) $(TEST1_TARGET) $(TEST2_TARGET)
 endif
 
-.PHONY: all clean   
+.PHONY: all clean test vendor-build
