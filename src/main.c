@@ -6,7 +6,7 @@
 #include "net.h"
 #include "ssh.h"
 #include "buffer.h"
-#include "packet.h"
+#include "session.h"
 
 int server(int port);
 int client(const char *user, const char *host, int port);
@@ -108,35 +108,28 @@ int server(int port)
     }
     printf("[server] Connection accepted from %s:%d\n", client_addr.ip, client_addr.port);
 
-    /* 1. Send version identification */
-    if (net_write_full(client_sock, IDENT_STRING, sizeof(IDENT_STRING) - 1) < 0) {
-        fprintf(stderr, "[server] write ident error: %s\n", net_get_error());
+    ssh_session_t sess;
+    session_init(&sess, client_sock);
+
+    /* 1. Hardened version banner exchange (RFC 4253 §4.2) */
+    if (session_exchange_ident(&sess, SSH_ROLE_SERVER) != 0) {
+        fprintf(stderr, "[server] identification exchange failed\n");
+        session_free(&sess);
         net_close(client_sock);
         net_close(fd);
         return -1;
     }
+    printf("[server] Client identification: %s\n", sess.v_c);
 
-    /* 2. Read client version identification */
-    char client_ident[256];
-    if (net_read_line(client_sock, client_ident, sizeof(client_ident)) <= 0) {
-        fprintf(stderr, "[server] read client ident error: %s\n", net_get_error());
-        net_close(client_sock);
-        net_close(fd);
-        return -1;
-    }
-    printf("[server] Client identification: %s", client_ident);
+    /* 2. Receive the first binary packet (plaintext phase, RFC 4253 §6) */
+    ssh_buf_t pkt;
+    buf_init(&pkt, 256);
 
-    /* 3. Receive initial binary packet from client */
-    uint32_t seq_in = 0;
-    uint32_t seq_out = 0;
-    ssh_pkt_t pkt;
-    pkt_init(&pkt);
-
-    if (pkt_recv(client_sock, &pkt, &seq_in, 8) == 0) {
+    if (session_recv(&sess, &pkt) == 0) {
         uint8_t msg_type = 0;
-        if (buf_get_u8(&pkt.payload, &msg_type) == 0) {
-            printf("[server] Received packet msg_type=%d, payload_len=%zu\n",
-                   msg_type, buf_len(&pkt.payload));
+        if (buf_get_u8(&pkt, &msg_type) == 0) {
+            printf("[server] Received packet msg_type=%d, payload_len=%zu, seq=%u\n",
+                   msg_type, buf_len(&pkt), sess.in.seq - 1);
         }
 
         /* Echo back an SSH_MSG_DEBUG packet */
@@ -144,14 +137,16 @@ int server(int port)
         buf_init(&reply, 64);
         buf_put_u8(&reply, SSH_MSG_DEBUG);
         buf_put_bool(&reply, true);
-        buf_put_cstring(&reply, "Coalesce Phase 1 binary packet framed successfully");
+        buf_put_cstring(&reply, "Coalesce session layer framed the packet successfully");
         buf_put_cstring(&reply, "");
-
-        pkt_send_buf(client_sock, &reply, &seq_out, 8);
+        session_send_buf(&sess, &reply);
         buf_free(&reply);
+    } else {
+        fprintf(stderr, "[server] packet receive failed\n");
     }
 
-    pkt_free(&pkt);
+    buf_free(&pkt);
+    session_free(&sess);
     net_close(client_sock);
     net_close(fd);
     printf("[server] Session ended cleanly.\n");
@@ -167,58 +162,52 @@ int client(const char *user, const char *host, int port)
         return -1;
     }
 
-    /* 1. Send client identification */
-    if (net_write_full(s, IDENT_STRING, sizeof(IDENT_STRING) - 1) < 0) {
-        fprintf(stderr, "[client] write ident error: %s\n", net_get_error());
+    ssh_session_t sess;
+    session_init(&sess, s);
+
+    /* 1. Hardened version banner exchange (RFC 4253 §4.2) */
+    if (session_exchange_ident(&sess, SSH_ROLE_CLIENT) != 0) {
+        fprintf(stderr, "[client] identification exchange failed\n");
+        session_free(&sess);
         net_close(s);
         return -1;
     }
+    printf("[client] Server identification: %s\n", sess.v_s);
 
-    /* 2. Read server identification */
-    char server_ident[256];
-    if (net_read_line(s, server_ident, sizeof(server_ident)) <= 0) {
-        fprintf(stderr, "[client] read server ident error: %s\n", net_get_error());
-        net_close(s);
-        return -1;
-    }
-    printf("[client] Server identification: %s", server_ident);
-
-    /* 3. Send test binary packet (SSH_MSG_IGNORE) */
-    uint32_t seq_out = 0;
-    uint32_t seq_in = 0;
+    /* 2. Send test binary packet (SSH_MSG_IGNORE) */
     ssh_buf_t msg;
     buf_init(&msg, 64);
     buf_put_u8(&msg, SSH_MSG_IGNORE);
     buf_put_cstring(&msg, "coalesce test packet");
 
-    if (pkt_send_buf(s, &msg, &seq_out, 8) != 0) {
+    if (session_send_buf(&sess, &msg) != 0) {
         fprintf(stderr, "[client] Failed to send packet\n");
     } else {
-        printf("[client] Sent SSH_MSG_IGNORE packet (seq=%u)\n", seq_out - 1);
+        printf("[client] Sent SSH_MSG_IGNORE packet (seq=%u)\n", sess.out.seq - 1);
     }
     buf_free(&msg);
 
-    /* 4. Receive reply packet */
-    ssh_pkt_t reply_pkt;
-    pkt_init(&reply_pkt);
-    if (pkt_recv(s, &reply_pkt, &seq_in, 8) == 0) {
+    /* 3. Receive reply packet */
+    ssh_buf_t reply;
+    buf_init(&reply, 256);
+    if (session_recv(&sess, &reply) == 0) {
         uint8_t msg_type = 0;
-        buf_get_u8(&reply_pkt.payload, &msg_type);
+        buf_get_u8(&reply, &msg_type);
         if (msg_type == SSH_MSG_DEBUG) {
             bool display = false;
-            buf_get_bool(&reply_pkt.payload, &display);
-            char *dbg_msg = buf_get_cstring(&reply_pkt.payload);
+            buf_get_bool(&reply, &display);
+            char *dbg_msg = buf_get_cstring(&reply);
             printf("[client] Received SSH_MSG_DEBUG (always_display=%d): %s\n",
                    display, dbg_msg ? dbg_msg : "");
             free(dbg_msg);
         } else {
-            printf("[client] Received packet msg_type=%d, payload_len=%zu\n",
-                   msg_type, buf_len(&reply_pkt.payload));
+            printf("[client] Received packet msg_type=%d\n", msg_type);
         }
     }
-    pkt_free(&reply_pkt);
+    buf_free(&reply);
 
+    session_free(&sess);
     net_close(s);
     printf("[client] Connection closed.\n");
     return 0;
-}   
+}

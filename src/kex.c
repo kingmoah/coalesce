@@ -1,47 +1,35 @@
 #include "kex.h"
 #include "ssh.h"
 #include "sha256.h"
+#include "rand.h"
 #include <stdlib.h>
 #include <string.h>
 
-#include "mbedtls/entropy.h"
-#include "mbedtls/ctr_drbg.h"
-
 #define DEFAULT_KEX "curve25519-sha256"
-#define DEFAULT_HOSTKEY "ssh-ed25519,rsa-sha2-256,ssh-rsa"
+#define DEFAULT_HOSTKEY "ssh-ed25519"
 #define DEFAULT_CIPHERS "aes128-ctr,aes256-ctr"
 #define DEFAULT_MACS "hmac-sha2-256"
 #define DEFAULT_COMP "none"
 
-static char *strdup_safe(const char *s)
+static char *strdup_safe(const char *string)
 {
-    if (!s) return NULL;
-    size_t len = strlen(s);
+    if (string == NULL) return NULL;
+    size_t len = strlen(string);
     char *copy = malloc(len + 1);
-    if (copy) {
-        memcpy(copy, s, len + 1);
+    if (copy != NULL) {
+        memcpy(copy, string, len + 1);
     }
     return copy;
 }
 
 void kex_init_default(ssh_kex_init_t *kex, bool is_server)
 {
-    if (!kex) return;
+    if (kex == NULL) return;
     memset(kex, 0, sizeof(*kex));
 
-    /* Random 16-byte cookie via mbedtls entropy */
-    {
-        mbedtls_entropy_context  entropy;
-        mbedtls_ctr_drbg_context ctr_drbg;
-        const char *pers = "coalesce_kex_cookie";
-
-        mbedtls_entropy_init(&entropy);
-        mbedtls_ctr_drbg_init(&ctr_drbg);
-        mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                               (const unsigned char *)pers, strlen(pers));
-        mbedtls_ctr_drbg_random(&ctr_drbg, kex->cookie, 16);
-        mbedtls_ctr_drbg_free(&ctr_drbg);
-        mbedtls_entropy_free(&entropy);
+    /* Random 16-byte cookie (RFC 4253 §7.1) */
+    if (rand_bytes(kex->cookie, 16) != 0) {
+        memset(kex->cookie, 0, 16);
     }
 
     kex->kex_algorithms = strdup_safe(DEFAULT_KEX);

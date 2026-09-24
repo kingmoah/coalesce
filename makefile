@@ -33,6 +33,10 @@ TARGET   = $(BUILDDIR)/$(PROJECT_NAME)$(EXE_EXT)
 SRCS = $(wildcard $(SRCDIR)/*.c)
 OBJS = $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.o,$(SRCS))
 
+# Library objects for test binaries: everything except main.o (the test
+# file provides its own main()).
+LIB_OBJS = $(filter-out $(BUILDDIR)/main.o,$(OBJS))
+
 # --- Rules ---
 all: $(TARGET)
 
@@ -60,14 +64,14 @@ test: $(TEST1_TARGET) $(TEST2_TARGET) $(TEST3_TARGET) $(TEST4_TARGET)
 $(TEST1_TARGET): $(BUILDDIR)/buffer.o tests/test_phase1.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -o $@ $^
 
-$(TEST2_TARGET): $(BUILDDIR)/buffer.o $(BUILDDIR)/rand.o $(BUILDDIR)/sha256.o $(BUILDDIR)/sha512.o $(BUILDDIR)/curve25519.o $(BUILDDIR)/ed25519.o $(BUILDDIR)/aes.o $(BUILDDIR)/kex.o $(BUILDDIR)/base64.o tests/test_phase2.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -o $@ $(BUILDDIR)/buffer.o $(BUILDDIR)/rand.o $(BUILDDIR)/sha256.o $(BUILDDIR)/sha512.o $(BUILDDIR)/curve25519.o $(BUILDDIR)/ed25519.o $(BUILDDIR)/aes.o $(BUILDDIR)/kex.o $(BUILDDIR)/base64.o tests/test_phase2.c $(LDLIBS)
+$(TEST2_TARGET): $(BUILDDIR)/buffer.o $(BUILDDIR)/rand.o $(BUILDDIR)/sha256.o $(BUILDDIR)/sha512.o $(BUILDDIR)/fe25519.o $(BUILDDIR)/curve25519.o $(BUILDDIR)/ed25519.o $(BUILDDIR)/aes.o $(BUILDDIR)/kex.o $(BUILDDIR)/base64.o tests/test_phase2.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $(BUILDDIR)/buffer.o $(BUILDDIR)/rand.o $(BUILDDIR)/sha256.o $(BUILDDIR)/sha512.o $(BUILDDIR)/fe25519.o $(BUILDDIR)/curve25519.o $(BUILDDIR)/ed25519.o $(BUILDDIR)/aes.o $(BUILDDIR)/kex.o $(BUILDDIR)/base64.o tests/test_phase2.c $(LDLIBS)
 
-$(TEST3_TARGET): $(filter $(BUILDDIR)/%.o,$(OBJS)) tests/test_phase3.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -o $@ $(filter $(BUILDDIR)/%.o,$(OBJS)) tests/test_phase3.c $(LDLIBS)
+$(TEST3_TARGET): $(LIB_OBJS) tests/test_phase3.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $(LIB_OBJS) tests/test_phase3.c $(LDLIBS)
 
-$(TEST4_TARGET): $(filter $(BUILDDIR)/%.o,$(OBJS)) tests/test_phase4.c | $(BUILDDIR)
-	$(CC) $(CFLAGS) -o $@ $(filter $(BUILDDIR)/%.o,$(OBJS)) tests/test_phase4.c $(LDLIBS)
+$(TEST4_TARGET): $(LIB_OBJS) tests/test_phase4.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $(LIB_OBJS) tests/test_phase4.c $(LDLIBS)
 
 # --- Clean ---
 clean:

@@ -1,45 +1,8 @@
 #include "packet.h"
+#include "rand.h"
 #include "ssh.h"
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-
-#ifdef _WIN32
-  #include <windows.h>
-  #include <wincrypt.h>
-#else
-  #include <fcntl.h>
-  #include <unistd.h>
-#endif
-
-static int get_random_bytes(uint8_t *dst, size_t len)
-{
-#ifdef _WIN32
-    HCRYPTPROV prov = 0;
-    if (CryptAcquireContext(&prov, NULL, NULL, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
-        BOOL ok = CryptGenRandom(prov, (DWORD)len, dst);
-        CryptReleaseContext(prov, 0);
-        if (ok) return 0;
-    }
-#else
-    int fd = open("/dev/urandom", O_RDONLY);
-    if (fd >= 0) {
-        ssize_t r = read(fd, dst, len);
-        close(fd);
-        if (r == (ssize_t)len) return 0;
-    }
-#endif
-    /* Fallback PRNG */
-    static int seeded = 0;
-    if (!seeded) {
-        srand((unsigned int)time(NULL));
-        seeded = 1;
-    }
-    for (size_t i = 0; i < len; i++) {
-        dst[i] = (uint8_t)(rand() & 0xFF);
-    }
-    return 0;
-}
 
 void pkt_init(ssh_pkt_t *pkt)
 {
@@ -124,7 +87,10 @@ int pkt_send(net_socket_t s, const uint8_t *payload, size_t payload_len, uint32_
     }
 
     /* random padding */
-    get_random_bytes(wire_buf + 5 + payload_len, pad_len);
+    if (rand_bytes(wire_buf + 5 + payload_len, pad_len) != 0) {
+        free(wire_buf);
+        return -1;
+    }
 
     /* Send wire buffer */
     ssize_t sent = net_write_full(s, wire_buf, total_wire_len);
