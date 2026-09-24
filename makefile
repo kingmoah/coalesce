@@ -20,18 +20,10 @@ CC       = gcc
 SRCDIR   = src
 BUILDDIR = build
 
-# --- mbedtls vendor paths ---
-MBEDTLS_DIR   = vendor/mbedtls
-MBEDTLS_BUILD = $(MBEDTLS_DIR)/build
-MBEDTLS_LIB   = $(MBEDTLS_BUILD)/tf-psa-crypto/library/libmbedcrypto.a
-MBEDTLS_INC   = -I$(MBEDTLS_DIR)/include \
-                -I$(MBEDTLS_DIR)/tf-psa-crypto/include \
-                -I$(MBEDTLS_DIR)/tf-psa-crypto/drivers/builtin/include
-
-CFLAGS   = -Wall -O2 $(MBEDTLS_INC)
+CFLAGS   = -Wall -O2
 
 ifeq ($(IS_WINDOWS),1)
-	LDLIBS  = -lws2_32 -lbcrypt
+	LDLIBS  = -lws2_32 -ladvapi32
 else
 	LDLIBS  =
 endif
@@ -44,8 +36,8 @@ OBJS = $(patsubst $(SRCDIR)/%.c,$(BUILDDIR)/%.o,$(SRCS))
 # --- Rules ---
 all: $(TARGET)
 
-$(TARGET): $(OBJS) $(MBEDTLS_LIB) | $(BUILDDIR)
-	$(CC) $(CFLAGS) -o $@ $(OBJS) $(MBEDTLS_LIB) $(LDLIBS)
+$(TARGET): $(OBJS) | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LDLIBS)
 
 $(BUILDDIR)/%.o: $(SRCDIR)/%.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -56,31 +48,33 @@ $(BUILDDIR):
 # --- Tests ---
 TEST1_TARGET = $(BUILDDIR)/test_phase1$(EXE_EXT)
 TEST2_TARGET = $(BUILDDIR)/test_phase2$(EXE_EXT)
+TEST3_TARGET = $(BUILDDIR)/test_phase3$(EXE_EXT)
+TEST4_TARGET = $(BUILDDIR)/test_phase4$(EXE_EXT)
 
-test: $(TEST1_TARGET) $(TEST2_TARGET)
+test: $(TEST1_TARGET) $(TEST2_TARGET) $(TEST3_TARGET) $(TEST4_TARGET)
 	./$(TEST1_TARGET)
 	./$(TEST2_TARGET)
+	./$(TEST3_TARGET)
+	./$(TEST4_TARGET)
 
 $(TEST1_TARGET): $(BUILDDIR)/buffer.o tests/test_phase1.c | $(BUILDDIR)
 	$(CC) $(CFLAGS) -o $@ $^
 
-$(TEST2_TARGET): $(BUILDDIR)/buffer.o $(BUILDDIR)/sha256.o $(BUILDDIR)/curve25519.o $(BUILDDIR)/aes.o $(BUILDDIR)/kex.o tests/test_phase2.c $(MBEDTLS_LIB) | $(BUILDDIR)
-	$(CC) $(CFLAGS) -o $@ $(BUILDDIR)/buffer.o $(BUILDDIR)/sha256.o $(BUILDDIR)/curve25519.o $(BUILDDIR)/aes.o $(BUILDDIR)/kex.o tests/test_phase2.c $(MBEDTLS_LIB) $(LDLIBS)
+$(TEST2_TARGET): $(BUILDDIR)/buffer.o $(BUILDDIR)/rand.o $(BUILDDIR)/sha256.o $(BUILDDIR)/sha512.o $(BUILDDIR)/curve25519.o $(BUILDDIR)/ed25519.o $(BUILDDIR)/aes.o $(BUILDDIR)/kex.o $(BUILDDIR)/base64.o tests/test_phase2.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $(BUILDDIR)/buffer.o $(BUILDDIR)/rand.o $(BUILDDIR)/sha256.o $(BUILDDIR)/sha512.o $(BUILDDIR)/curve25519.o $(BUILDDIR)/ed25519.o $(BUILDDIR)/aes.o $(BUILDDIR)/kex.o $(BUILDDIR)/base64.o tests/test_phase2.c $(LDLIBS)
 
-# --- Vendor bootstrap (run once after git submodule update --init) ---
-vendor-build:
-	cmake -S $(MBEDTLS_DIR) -B $(MBEDTLS_BUILD) \
-	      -DCMAKE_BUILD_TYPE=Release \
-	      -DENABLE_TESTING=OFF \
-	      -DENABLE_PROGRAMS=OFF
-	cmake --build $(MBEDTLS_BUILD) --target mbedcrypto
+$(TEST3_TARGET): $(filter $(BUILDDIR)/%.o,$(OBJS)) tests/test_phase3.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $(filter $(BUILDDIR)/%.o,$(OBJS)) tests/test_phase3.c $(LDLIBS)
+
+$(TEST4_TARGET): $(filter $(BUILDDIR)/%.o,$(OBJS)) tests/test_phase4.c | $(BUILDDIR)
+	$(CC) $(CFLAGS) -o $@ $(filter $(BUILDDIR)/%.o,$(OBJS)) tests/test_phase4.c $(LDLIBS)
 
 # --- Clean ---
 clean:
 ifeq ($(IS_WINDOWS),1)
 	cmd /c "if exist $(BUILDDIR) (del /f /q $(subst /,\,$(BUILDDIR))\*.*)"
 else
-	$(RM) $(BUILDDIR)/*.o $(TARGET) $(TEST1_TARGET) $(TEST2_TARGET)
+	$(RM) $(BUILDDIR)/*.o $(TARGET) $(TEST1_TARGET) $(TEST2_TARGET) $(TEST3_TARGET) $(TEST4_TARGET)
 endif
 
-.PHONY: all clean test vendor-build
+.PHONY: all clean test

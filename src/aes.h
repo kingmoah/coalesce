@@ -4,24 +4,23 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "mbedtls/aes.h"
-
 #define AES_BLOCK_SIZE 16
+#define AES_MAX_ROUNDS 14 /* 10 (128-bit) / 12 (192-bit) / 14 (256-bit) */
 
-/* ── Raw AES block context (encrypt-only, for compat) ─────────── */
+/* ── Raw AES context (encrypt-only) ────────────────────────────── */
 
 typedef struct {
-    mbedtls_aes_context ctx;
-    int key_bits;
+    uint32_t rk[4 * (AES_MAX_ROUNDS + 1)];
+    int      rounds;
 } aes_ctx_t;
 
-/* ── AES-CTR streaming context ───────────────────────────────── */
+/* ── AES-CTR streaming context ─────────────────────────────────── */
 
 typedef struct {
-    mbedtls_aes_context  aes;
-    uint8_t              nonce_counter[AES_BLOCK_SIZE]; /* current counter block */
-    uint8_t              stream[AES_BLOCK_SIZE];        /* keystream buffer      */
-    size_t               stream_offset;                 /* bytes consumed        */
+    aes_ctx_t             aes;
+    uint8_t               nonce_counter[AES_BLOCK_SIZE]; /* current counter block */
+    uint8_t               stream[AES_BLOCK_SIZE];        /* keystream buffer      */
+    size_t                stream_offset;                 /* bytes consumed        */
 } aes_ctr_ctx_t;
 
 /* Standard AES key setup and block encryption */
@@ -30,7 +29,7 @@ void aes_encrypt_block(const aes_ctx_t *ctx,
                        const uint8_t in[AES_BLOCK_SIZE],
                        uint8_t out[AES_BLOCK_SIZE]);
 
-/* AES-CTR mode */
+/* AES-CTR mode (encrypt == decrypt) */
 int  aes_ctr_init(aes_ctr_ctx_t *ctx, const uint8_t *key, int key_bits,
                   const uint8_t iv[AES_BLOCK_SIZE]);
 void aes_ctr_crypt(aes_ctr_ctx_t *ctx, const uint8_t *in, uint8_t *out, size_t len);
