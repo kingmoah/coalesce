@@ -1,0 +1,6 @@
+- Test functions are declared `static void` inside the translation unit and invoked from a single `main()` that prints a banner before running them.
+- Assertions drive pass/fail via `assert(expr == expected)` combined with `printf("PASS: ...\n")` after each test function returns successfully.
+- Expected byte sequences are expressed as hex string literals and decoded at runtime through a local `hex_to_bytes` helper rather than inline `uint8_t` arrays.
+- Cryptographic vectors are annotated with their normative source (e.g. "RFC 8032 §7.1 TEST N", "FIPS 180-4", "FIPS-197 Appendix C", "RFC 7748 Section 6.1").
+- Negative-test cases assert non-zero return values or failed verification to confirm rejection of corrupted inputs, wrong lengths, unsupported algorithms, and malformed packets.
+- Integration tests in `test_phase3.c` create isolated client/server pairs via a local `make_pair` helper that probes ports 42100–42199, keeping each sub-test self-contained.

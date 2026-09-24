@@ -1,0 +1,1 @@
+`make all` builds the `coalesce` CLI; `make test` builds and sequentially runs `test_phase1` through `test_phase4`; `make clean` removes the `build/` directory contents. No IDE or external toolchain is required beyond gcc and make.

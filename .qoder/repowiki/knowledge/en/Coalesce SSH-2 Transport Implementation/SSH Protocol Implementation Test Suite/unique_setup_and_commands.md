@@ -1,0 +1,1 @@
+Each file compiles into its own standalone executable (e.g. `gcc -o test_phase2 tests/test_phase2.c src/*.c`) and must be linked against the matching `src/` sources; `test_phase3.c` additionally requires `net_init()`/`net_shutdown()` and a working TCP stack since it opens loopback sockets on ports 42100–42199.

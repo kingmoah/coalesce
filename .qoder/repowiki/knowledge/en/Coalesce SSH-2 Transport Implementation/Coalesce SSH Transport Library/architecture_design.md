@@ -1,0 +1,9 @@
+Flat C source tree under `src/` organized by protocol concern with clear dependency direction:
+- Lowest layer: `net.{c,h}` wraps Winsock/BSD sockets with `net_init`/`net_shutdown`, blocking `net_read_full`/`net_write_full`, and line reading.
+- Primitive utilities: `buffer.c` (growable `ssh_buf_t` with typed put/get), `base64.c`, `rand.c`, `aes.c` (AES-CTR via OpenSSL's EVP), `sha256.c`/`sha512.c`, `curve25519.c`/`fe25519.c`, `ed25519.c`.
+- Packet framing: `packet.{c,h}` serializes/deserializes the wire format (`packet_length`, `padding_length`, payload, padding, MAC) over a raw socket given a block size and sequence counter.
+- Session layer: `session.{c,h}` owns per-direction state (`ssh_direction_t`: cipher context, MAC key, seq), performs the hardened version-banner exchange (`session_exchange_ident`), installs keys via `session_set_keys` + `session_activate`, and exposes `session_send`/`session_recv` that apply cipher+MAC automatically.
+- Key exchange: `kex.{c,h}` parses/encodes `KEXINIT` payloads, negotiates algorithm proposals (`kex_negotiate`), and derives keys via the RFC 4253 §7.2 KDF (`kex_derive_key`).
+- Public constants (message numbers, disconnect codes, channel codes, max packet sizes, banner strings) live in `ssh.h`.
+- Entry point `main.c` implements two subcommands — `serve` (TCP listener, one connection, identification exchange, echo debug packet) and `connect` (client connecting to `user@host[:port]`) — demonstrating the session API end-to-end.
+Dependency direction is strictly upward: main → session → {packet, kex} → {aes, sha*, curve25519, ed25519, base64, rand} → buffer/net; nothing below depends on higher layers.

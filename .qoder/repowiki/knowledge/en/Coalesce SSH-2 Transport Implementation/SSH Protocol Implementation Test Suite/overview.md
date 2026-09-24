@@ -1,0 +1,1 @@
+Standalone C test executables that validate the SSH-2.0 implementation's buffer primitives, cryptographic primitives, and session-layer framing against RFC vectors.

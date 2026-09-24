@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: ""
+title: Coalesce SSH-2 Transport Implementation
+scope:
+    - README.md
+    - .gitignore
+    - makefile
+    - LICENSE.md
+source_files: []
+depends_on: []
+related_to: []

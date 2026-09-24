@@ -1,0 +1,1 @@
+Plain C with `<assert.h>` for assertions; relies on the host's OpenSSL or system crypto only indirectly through the library — tests themselves use no external libraries beyond the C standard library. Curve25519 math uses `unsigned __int128` (MSVC) / `u128` typedefs for 51-bit limb arithmetic.

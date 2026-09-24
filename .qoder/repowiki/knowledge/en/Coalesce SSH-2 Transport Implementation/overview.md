@@ -1,0 +1,1 @@
+Top-level build orchestration for a C SSH-2 transport library and its phased test suite, producing a single CLI binary plus four test executables via one Makefile.

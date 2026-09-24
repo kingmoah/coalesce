@@ -1,0 +1,1 @@
+A minimal C implementation of the SSH-2 transport layer (RFC 4253) providing binary packet framing, AES-CTR encryption, HMAC-SHA2 MAC, Diffie-Hellman key exchange, and a CLI client/server demo.

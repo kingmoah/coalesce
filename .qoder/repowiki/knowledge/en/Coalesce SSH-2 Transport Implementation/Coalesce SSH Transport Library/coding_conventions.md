@@ -1,0 +1,5 @@
+- Every public struct has a matching lifecycle pair `*_init`/`*_free` (and often `*_reset`) — e.g. `buf_init`/`buf_free`, `pkt_init`/`pkt_free`, `kex_init_default`/`kex_init_free`, `session_init`/`session_free`.
+- Buffer I/O functions return `int` where `0` means success and `-1` signals allocation failure or underflow, consistently used across all `buf_put_*` and `buf_get_*` helpers.
+- Network handles are validated through the `NET_IS_VALID(s)` macro rather than direct integer comparison, abstracting away the Winsock vs BSD socket descriptor semantics.
+- Public headers guard against multiple inclusion with `COALESCE_<NAME>_H` include guards and use `<stdint.h>`/`<stddef.h>`/`<stdbool.h>` for portable fixed-width types instead of platform-specific integers.
+- SSH protocol constants (message types, disconnect reasons, channel codes, banner strings, max sizes) are centralized as `#define` macros in `ssh.h` rather than scattered across implementations.

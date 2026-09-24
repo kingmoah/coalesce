@@ -1,0 +1,1 @@
+GNU make + gcc; OpenSSL/libcrypto not used — cryptography is implemented in-tree (AES, SHA-256/512, Curve25519/Ed25519, Diffie-Hellman). Windows builds additionally link `ws2_32` and `advapi32`.

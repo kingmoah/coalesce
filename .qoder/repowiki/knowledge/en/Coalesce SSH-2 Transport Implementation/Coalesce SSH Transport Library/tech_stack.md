@@ -1,0 +1,1 @@
+C99 with OpenSSL for AES-CTR (`aes_ctr_ctx_t` from `aes.h`) and SHA-256/SHA-512; Curve25519/Ed25519 are hand-rolled (`fe25519.c`, `curve25519.c`, `ed25519.c`); Winsock2 vs BSD sockets are selected at compile time via `_WIN32` macros in `net.h`.

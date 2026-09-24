@@ -1,0 +1,2 @@
+- Each test phase lives in its own `tests/test_phaseN.c` with its own `main()`, compiled as an independent executable linked against the shared library objects.
+- Build artifacts are always placed under a single `build/` directory, with `.o` files mirroring the `src/` layout.

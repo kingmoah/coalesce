@@ -1,0 +1,41 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: en-US
+branch: main
+nodes_managed: true
+exported_at: "2026-09-24T22:14:47Z"
+modules:
+    "":
+        dir_name: Coalesce SSH-2 Transport Implementation
+        title: Coalesce SSH-2 Transport Implementation
+        scope:
+            - README.md
+            - .gitignore
+            - makefile
+            - LICENSE.md
+        source_files: []
+        children:
+            - ssh_library
+            - tests
+        depends_on: []
+        related_to: []
+    ssh_library:
+        dir_name: Coalesce SSH Transport Library
+        title: Coalesce SSH Transport Library
+        scope:
+            - src/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: tests
+    tests:
+        dir_name: SSH Protocol Implementation Test Suite
+        title: SSH Protocol Implementation Test Suite
+        scope:
+            - tests/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: ssh_library
